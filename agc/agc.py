@@ -83,7 +83,24 @@ def read_fasta(amplicon_file: Path, minseqlen: int) -> Iterator[str]:
     :param minseqlen: (int) Minimum amplicon sequence length
     :return: A generator object that provides the Fasta sequences (str).
     """
-    pass
+    with gzip.open(amplicon_file, "rt") as fasta:
+        amplicon = ""
+        first_line = True
+        for line in fasta:
+            if first_line:
+                amplicon = ""
+                first_line = False
+                continue
+            elif line.startswith(">"):
+                if len(amplicon) >= minseqlen:
+                    yield amplicon
+                    amplicon = ""
+                else:
+                    amplicon = ""
+            else:
+                amplicon += line.strip()
+        yield amplicon
+
 
 
 def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int) -> Iterator[List]:
@@ -94,7 +111,17 @@ def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int)
     :param mincount: (int) Minimum amplicon count
     :return: A generator object that provides a (list)[sequences, count] of sequence with a count >= mincount and a length >= minseqlen.
     """
-    pass
+    sequences_dict = {}
+    for sequence in read_fasta(amplicon_file, minseqlen):
+        if sequence in sequences_dict:
+            sequences_dict[sequence] += 1
+        else:
+            sequences_dict[sequence] = 1
+    sequences_dict = sorted(sequences_dict.items(), key=lambda item: item[1], reverse=True)    
+    for sequence, occurence in sequences_dict:
+        if occurence >= mincount:
+            yield [sequence, occurence]
+    
 
 def get_identity(alignment_list: List[str]) -> float:
     """Compute the identity rate between two sequences
@@ -102,7 +129,14 @@ def get_identity(alignment_list: List[str]) -> float:
     :param alignment_list:  (list) A list of aligned sequences in the format ["SE-QUENCE1", "SE-QUENCE2"]
     :return: (float) The rate of identity between the two sequences.
     """
-    pass
+    seq_i = alignment_list[0]
+    seq_j = alignment_list[1]
+    same_nucl = 0
+    for i in range(len(seq_i)):
+        if seq_i[i] == seq_j[i]:
+            same_nucl += 1
+    return (same_nucl/len(seq_i))*100
+    
 
 def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: int, chunk_size: int, kmer_size: int) -> List:
     """Compute an abundance greedy clustering regarding sequence count and identity.
@@ -115,7 +149,30 @@ def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: i
     :param kmer_size: (int) A fournir mais non utilise cette annee
     :return: (list) A list of all the [OTU (str), count (int)] .
     """
-    pass
+    otu_dict = {}
+    for seq_occ in dereplication_fulllength(amplicon_file, minseqlen, mincount):
+        seq_i = seq_occ[0]
+        occ_i = seq_occ[1]
+        if len(otu_dict) == 0:
+            otu_dict[seq_i] = occ_i
+        else:
+            for seq_j, occ_j in otu_dict.items():
+                if seq_j != seq_i:
+                    alignment = nw.global_align(seq_i, seq_j, gap_open=-1, gap_extend=-1,matrix=str(Path(__file__).parent / "MATCH"))
+                    identity = get_identity(list(alignment))
+                    if identity >= 97:
+                        if occ_i > occ_j:
+                            del otu_dict[seq_j]
+                            otu_dict[seq_i] = occ_i
+                            break
+                    else:
+                        otu_dict[seq_i] = occ_i
+                        break
+    
+    list_otu = [[seq, occ] for seq, occ in otu_dict.items()]
+
+    return list_otu
+
 
 
 def write_OTU(OTU_list: List, output_file: Path) -> None:
@@ -124,7 +181,15 @@ def write_OTU(OTU_list: List, output_file: Path) -> None:
     :param OTU_list: (list) A list of OTU sequences
     :param output_file: (Path) Path to the output file
     """
-    pass
+    with open(output_file, "w+") as out:
+        count = 1
+        for otu in OTU_list:
+            seq = otu[0]
+            occ = otu[1]
+            out.write(f">OTU_{count} occurrence:{occ}\n")
+            out.write(textwrap.fill(seq, width=80))
+            out.write("\n")
+            count += 1
 
 
 #==============================================================
